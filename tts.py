@@ -27,5 +27,5 @@ async def _generate(text, mood):
     audio_buffer.seek(0)
     return audio_buffer.read()
 
-def generate_audio_clip(text, mood):
+def generate_audio(text, mood):
     return asyncio.run(_generate(text, mood))
