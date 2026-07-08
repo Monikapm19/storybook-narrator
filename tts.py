@@ -4,11 +4,11 @@ import io
 
 # Each mood gets a different voice + rate + pitch
 MOOD_SETTINGS = {
-    'happy':    {'voice': 'en-US-JennyNeural',   'rate': '+20%', 'pitch': '+10Hz'},
+    'happy':    {'voice': 'en-US-JennyNeural',   'rate': '-5%', 'pitch': '+5Hz'},
     'sad':      {'voice': 'en-US-JennyNeural',   'rate': '-20%', 'pitch': '-10Hz'},
     'scary':    {'voice': 'en-US-JennyNeural',   'rate': '-15%', 'pitch': '-15Hz'},
     'calm':     {'voice': 'en-US-JennyNeural',   'rate': '-10%', 'pitch': '+0Hz'},
-    'exciting': {'voice': 'en-US-JennyNeural',   'rate': '+30%', 'pitch': '+15Hz'},
+    'exciting': {'voice': 'en-US-JennyNeural', 'rate': '+5%', 'pitch': '+5Hz'},
     'neutral':  {'voice': 'en-US-JennyNeural',   'rate': '+0%',  'pitch': '+0Hz'},
 }
 
