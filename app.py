@@ -68,13 +68,13 @@ if uploaded_file:
 
         st.success(f"🎭 Final Mood: **{final_mood.upper()}**")
 
-        if sentence_emotions and len(sentence_emotions) > 1:
-            st.write('**Sentence-level emotions:**')
-            for sentence, mood, score in sentence_emotions:
-                st.write(f'- *"{sentence}"* → **{mood}** ({score:.0%})')
-
+        # Note: we intentionally do NOT pass sentence_emotions here.
+        # Passing it would make TTS use per-sentence text-only moods,
+        # bypassing our fused final_mood (including suspense/irony).
+        # Using the single whole-page final_mood keeps the fusion
+        # novelty audible. Combining both features is a future task.
         with st.spinner('Generating narration...'):
-                    audio_bytes = generate_audio(text, final_mood, sentence_emotions)
+            audio_bytes = generate_audio(text, final_mood)
 
         st.markdown('### Narration')
         st.audio(audio_bytes, format='audio/mp3')
