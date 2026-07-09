@@ -25,7 +25,7 @@ if uploaded_file:
     page_num = 0
     if uploaded_file.name.lower().endswith('.pdf'):
         pdf = fitz.open(stream=uploaded_file.read(), filetype='pdf')
-        uploaded_file.seek(0)  # reset file pointer so it can be read again
+        uploaded_file.seek(0)
         total_pages = len(pdf)
 
         col1, col2 = st.columns([3, 1])
@@ -52,7 +52,7 @@ if uploaded_file:
 
         with st.spinner('Detecting mood...'):
             img_mood, img_score = get_image_mood(image)
-            text_mood, text_score = get_text_mood(text)
+            text_mood, text_score, sentence_emotions = get_text_mood(text)
             final_mood = fuse_moods(img_mood, img_score, text_mood, text_score)
 
         st.markdown('---')
@@ -68,18 +68,13 @@ if uploaded_file:
 
         st.success(f"🎭 Final Mood: **{final_mood.upper()}**")
 
-        # Temporary fallback: tts.py doesn't yet have voice styles for the
-        # new 'suspense'/'irony' moods from fusion.py's conflict detection.
-        # Map them to the closest existing supported mood until Kruthika
-        # adds dedicated voice styles for these two.
-        TTS_FALLBACK_MAP = {
-            'suspense': 'scary',
-            'irony': 'sad'
-        }
-        tts_mood = TTS_FALLBACK_MAP.get(final_mood, final_mood)
-
+        # Note: we intentionally do NOT pass sentence_emotions here.
+        # Passing it would make TTS use per-sentence text-only moods,
+        # bypassing our fused final_mood (including suspense/irony).
+        # Using the single whole-page final_mood keeps the fusion
+        # novelty audible. Combining both features is a future task.
         with st.spinner('Generating narration...'):
-            audio_bytes = generate_audio(text, tts_mood)
+            audio_bytes = generate_audio(text, final_mood)
 
         st.markdown('### Narration')
         st.audio(audio_bytes, format='audio/mp3')
