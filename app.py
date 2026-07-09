@@ -25,7 +25,7 @@ if uploaded_file:
     page_num = 0
     if uploaded_file.name.lower().endswith('.pdf'):
         pdf = fitz.open(stream=uploaded_file.read(), filetype='pdf')
-        uploaded_file.seek(0)  # reset file pointer so it can be read again
+        uploaded_file.seek(0)
         total_pages = len(pdf)
 
         col1, col2 = st.columns([3, 1])
@@ -52,7 +52,7 @@ if uploaded_file:
 
         with st.spinner('Detecting mood...'):
             img_mood, img_score = get_image_mood(image)
-            text_mood, text_score = get_text_mood(text)
+            text_mood, text_score, sentence_emotions = get_text_mood(text)
             final_mood = fuse_moods(img_mood, img_score, text_mood, text_score)
 
         st.markdown('---')
@@ -68,8 +68,13 @@ if uploaded_file:
 
         st.success(f"🎭 Final Mood: **{final_mood.upper()}**")
 
+        if sentence_emotions and len(sentence_emotions) > 1:
+            st.write('**Sentence-level emotions:**')
+            for sentence, mood, score in sentence_emotions:
+                st.write(f'- *"{sentence}"* → **{mood}** ({score:.0%})')
+
         with st.spinner('Generating narration...'):
-            audio_bytes = generate_audio(text, final_mood)
+                    audio_bytes = generate_audio(text, final_mood, sentence_emotions)
 
         st.markdown('### Narration')
         st.audio(audio_bytes, format='audio/mp3')
