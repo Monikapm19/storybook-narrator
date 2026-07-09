@@ -68,8 +68,18 @@ if uploaded_file:
 
         st.success(f"🎭 Final Mood: **{final_mood.upper()}**")
 
+        # Temporary fallback: tts.py doesn't yet have voice styles for the
+        # new 'suspense'/'irony' moods from fusion.py's conflict detection.
+        # Map them to the closest existing supported mood until Kruthika
+        # adds dedicated voice styles for these two.
+        TTS_FALLBACK_MAP = {
+            'suspense': 'scary',
+            'irony': 'sad'
+        }
+        tts_mood = TTS_FALLBACK_MAP.get(final_mood, final_mood)
+
         with st.spinner('Generating narration...'):
-            audio_bytes = generate_audio(text, final_mood)
+            audio_bytes = generate_audio(text, tts_mood)
 
         st.markdown('### Narration')
         st.audio(audio_bytes, format='audio/mp3')
