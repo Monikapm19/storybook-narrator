@@ -38,7 +38,12 @@ def show_explanation(explanation, final_mood):
                 f"**Text** contributed **{explanation['text_contribution_pct']}%** "
                 f"(predicted *{explanation['text_mood']}*)."
             )
-        if explanation['conflict']:
+        if explanation.get('special_label'):
+            st.info(
+                f"🎭 Detected narrative contrast: **{explanation['special_label'].upper()}** "
+                f"(image and text convey opposing emotional tones)"
+            )
+        elif explanation['conflict']:
             st.warning(
                 f"⚠️ Image and text disagreed — the system resolved this by trusting "
                 f"the more confident signal, choosing **{final_mood}**."
@@ -72,7 +77,8 @@ if uploaded_file:
 
         preview_img = load_as_image(uploaded_file, page_number=start_page - 1)
         uploaded_file.seek(0)
-        st.image(preview_img, caption=f'Preview — Page {start_page}', width='stretch')
+        page_display = st.empty()
+        page_display.image(preview_img, caption=f'Page {start_page} of {total_pages}', width='stretch')
 
     else:
         image = load_as_image(uploaded_file, page_number=0)
@@ -87,10 +93,18 @@ if uploaded_file:
         if is_pdf:
             page_range = range(start_page - 1, end_page)
             progress_bar = st.progress(0, text='Starting narration...')
+            results_area = st.container()
 
             for i, page_idx in enumerate(page_range):
                 uploaded_file.seek(0)
                 page_image = load_as_image(uploaded_file, page_number=page_idx)
+
+                # "Turn the page" — update the same image placeholder in place
+                page_display.image(
+                    page_image,
+                    caption=f'📖 Now narrating — Page {page_idx + 1} of {total_pages}',
+                    width='stretch'
+                )
 
                 progress_bar.progress(
                     (i + 1) / len(page_range),
@@ -102,7 +116,7 @@ if uploaded_file:
                     continue  # skip blank/illustration-only pages
 
                 img_mood, img_score = get_image_mood(page_image)
-                text_mood, text_score = get_text_mood(text)
+                text_mood, text_score, sentence_emotions = get_text_mood(text)
                 final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
 
                 audio_bytes = generate_audio(text, final_mood)
@@ -110,17 +124,19 @@ if uploaded_file:
 
                 full_text_display.append(f"**Page {page_idx + 1}** ({final_mood}): {text}")
 
-                st.markdown(f"**Page {page_idx + 1} — Mood: {final_mood.upper()}**")
-                show_explanation(explanation, final_mood)
+                with results_area:
+                    st.markdown(f"**Page {page_idx + 1} — Mood: {final_mood.upper()}**")
+                    show_explanation(explanation, final_mood)
 
             progress_bar.empty()
+            page_display.image(preview_img, caption=f'Finished — showing page {start_page}', width='stretch')
 
         else:
             with st.spinner('Reading the page...'):
                 text = extract_text(image)
 
             img_mood, img_score = get_image_mood(image)
-            text_mood, text_score = get_text_mood(text)
+            text_mood, text_score, sentence_emotions = get_text_mood(text)
             final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
 
             combined_audio = generate_audio(text, final_mood)
