@@ -9,7 +9,7 @@ import fitz
 
 st.set_page_config(page_title='Storybook Narrator', layout='centered')
 st.title('📖 Storybook Narrator')
-st.write('Upload a storybook page (image or PDF) to hear it narrated with matching emotion.')
+st.write('Upload a storybook page (image) or a PDF to hear it narrated with matching emotion.')
 
 st.markdown('---')
 
@@ -19,57 +19,136 @@ uploaded_file = st.file_uploader(
     help='Supports JPG, PNG, or PDF storybook pages'
 )
 
+
+def show_explanation(explanation, final_mood):
+    """Displays a transparent breakdown of why a mood was chosen."""
+    with st.expander("ℹ️ Why was this mood chosen?"):
+        st.write(
+            f"**Image** contributed **{explanation['img_contribution_pct']}%** "
+            f"(predicted *{explanation['img_mood']}*)."
+        )
+        if explanation['matched_keywords']:
+            keywords_str = ', '.join(f'"{w}"' for w in explanation['matched_keywords'])
+            st.write(
+                f"**Text** contributed **{explanation['text_contribution_pct']}%** "
+                f"(predicted *{explanation['text_mood']}*, triggered by words like {keywords_str})."
+            )
+        else:
+            st.write(
+                f"**Text** contributed **{explanation['text_contribution_pct']}%** "
+                f"(predicted *{explanation['text_mood']}*)."
+            )
+        if explanation['conflict']:
+            st.warning(
+                f"⚠️ Image and text disagreed — the system resolved this by trusting "
+                f"the more confident signal, choosing **{final_mood}**."
+            )
+        else:
+            st.info("✅ Image and text agreed on the mood.")
+
+
 if uploaded_file:
     st.caption(f"📄 {uploaded_file.name} — {uploaded_file.size / 1024:.1f} KB")
 
-    page_num = 0
-    if uploaded_file.name.lower().endswith('.pdf'):
+    is_pdf = uploaded_file.name.lower().endswith('.pdf')
+
+    if is_pdf:
         pdf = fitz.open(stream=uploaded_file.read(), filetype='pdf')
-        uploaded_file.seek(0)  # reset file pointer so it can be read again
+        uploaded_file.seek(0)
         total_pages = len(pdf)
 
-        col1, col2 = st.columns([3, 1])
+        st.info(f"This PDF has **{total_pages} pages**. Choose the story range below — "
+                f"skip title/author/copyright pages and only narrate the actual story.")
+
+        col1, col2 = st.columns(2)
         with col1:
-            page_num = st.slider('Select page', 1, total_pages, 1) - 1
+            start_page = st.number_input('Start page', min_value=1, max_value=total_pages, value=1)
         with col2:
-            st.metric('Total Pages', total_pages)
+            end_page = st.number_input('End page', min_value=1, max_value=total_pages, value=total_pages)
 
-    image = load_as_image(uploaded_file, page_number=page_num)
+        if start_page > end_page:
+            st.error('Start page must be less than or equal to end page.')
+            st.stop()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(image, caption='Uploaded Page', use_column_width=True)
+        preview_img = load_as_image(uploaded_file, page_number=start_page - 1)
+        uploaded_file.seek(0)
+        st.image(preview_img, caption=f'Preview — Page {start_page}', width='stretch')
 
-    narrate_clicked = st.button('🎙️ Narrate This Page', use_container_width=True)
+    else:
+        image = load_as_image(uploaded_file, page_number=0)
+        st.image(image, caption='Uploaded Page', width='stretch')
+
+    narrate_clicked = st.button('🎙️ Narrate', use_container_width=True)
 
     if narrate_clicked:
-        with st.spinner('Reading the page...'):
-            text = extract_text(image)
+        combined_audio = b''
+        full_text_display = []
 
-        with col2:
-            st.markdown('**Extracted Text**')
-            st.text_area('Extracted text', text, height=200, disabled=True, label_visibility='collapsed')
+        if is_pdf:
+            page_range = range(start_page - 1, end_page)
+            progress_bar = st.progress(0, text='Starting narration...')
 
-        with st.spinner('Detecting mood...'):
+            for i, page_idx in enumerate(page_range):
+                uploaded_file.seek(0)
+                page_image = load_as_image(uploaded_file, page_number=page_idx)
+
+                progress_bar.progress(
+                    (i + 1) / len(page_range),
+                    text=f'Processing page {page_idx + 1} of {end_page}...'
+                )
+
+                text = extract_text(page_image)
+                if not text or len(text.strip()) < 3:
+                    continue  # skip blank/illustration-only pages
+
+                img_mood, img_score = get_image_mood(page_image)
+                text_mood, text_score = get_text_mood(text)
+                final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
+
+                audio_bytes = generate_audio(text, final_mood)
+                combined_audio += audio_bytes
+
+                full_text_display.append(f"**Page {page_idx + 1}** ({final_mood}): {text}")
+
+                st.markdown(f"**Page {page_idx + 1} — Mood: {final_mood.upper()}**")
+                show_explanation(explanation, final_mood)
+
+            progress_bar.empty()
+
+        else:
+            with st.spinner('Reading the page...'):
+                text = extract_text(image)
+
             img_mood, img_score = get_image_mood(image)
             text_mood, text_score = get_text_mood(text)
-            final_mood = fuse_moods(img_mood, img_score, text_mood, text_score)
+            final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
+
+            combined_audio = generate_audio(text, final_mood)
+            full_text_display.append(f"**Mood: {final_mood}**: {text}")
+
+            st.markdown('---')
+            st.markdown('### Mood Detection')
+
+            mcol1, mcol2 = st.columns(2)
+            with mcol1:
+                st.write(f"🖼️ Image Mood: **{img_mood}**")
+                st.progress(img_score)
+            with mcol2:
+                st.write(f"📝 Text Mood: **{text_mood}**")
+                st.progress(text_score)
+
+            st.success(f"🎭 Final Mood: **{final_mood.upper()}**")
+            show_explanation(explanation, final_mood)
 
         st.markdown('---')
-        st.markdown('### Mood Detection')
-
-        mcol1, mcol2 = st.columns(2)
-        with mcol1:
-            st.write(f"🖼️ Image Mood: **{img_mood}**")
-            st.progress(img_score)
-        with mcol2:
-            st.write(f"📝 Text Mood: **{text_mood}**")
-            st.progress(text_score)
-
-        st.success(f"🎭 Final Mood: **{final_mood.upper()}**")
-
-        with st.spinner('Generating narration...'):
-            audio_bytes = generate_audio(text, final_mood)
+        st.markdown('### Extracted Story Text')
+        st.text_area(
+            'Full extracted text',
+            '\n\n'.join(full_text_display),
+            height=250,
+            disabled=True,
+            label_visibility='collapsed'
+        )
 
         st.markdown('### Narration')
-        st.audio(audio_bytes, format='audio/mp3')
+        st.audio(combined_audio, format='audio/mp3')
