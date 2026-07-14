@@ -9,7 +9,7 @@ from tts import generate_audio
 import fitz
 import base64
 import io
-from mutagen.mp3 import MP3
+from bark import SAMPLE_RATE
 
 st.set_page_config(page_title='Storybook Narrator', layout='centered')
 st.title('📖 Storybook Narrator')
@@ -22,6 +22,13 @@ uploaded_file = st.file_uploader(
     type=['jpg', 'jpeg', 'png', 'pdf'],
     help='Supports JPG, PNG, or PDF storybook pages'
 )
+
+
+def get_wav_duration(wav_bytes):
+    """Get duration of WAV audio in seconds."""
+    # WAV header is 44 bytes, then 2 bytes per sample (16-bit), mono
+    num_samples = (len(wav_bytes) - 44) / 2
+    return num_samples / SAMPLE_RATE
 
 
 def show_explanation(explanation, final_mood):
@@ -87,11 +94,11 @@ if uploaded_file:
 
         preview_img = load_as_image(uploaded_file, page_number=start_page - 1)
         uploaded_file.seek(0)
-        st.image(preview_img, caption=f'Preview — Page {start_page} of {total_pages}', width='stretch')
+        st.image(preview_img, caption=f'Preview — Page {start_page} of {total_pages}', use_column_width=True)
 
     else:
         image = load_as_image(uploaded_file, page_number=0)
-        st.image(image, caption='Uploaded Page', width='stretch')
+        st.image(image, caption='Uploaded Page', use_column_width=True)
 
     narrate_clicked = st.button('🎙️ Narrate', use_container_width=True)
 
@@ -118,14 +125,14 @@ if uploaded_file:
 
                 text = extract_text(page_image)
                 if not text or len(text.strip()) < 3:
-                    continue  # skip blank/illustration-only pages
+                    continue
 
                 img_mood, img_score = get_image_mood(page_image)
                 text_mood, text_score, sentence_emotions = get_text_mood(text)
                 final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
 
                 audio_bytes = generate_audio(text, final_mood)
-                clip_duration = MP3(io.BytesIO(audio_bytes)).info.length
+                clip_duration = get_wav_duration(audio_bytes)
 
                 page_images_b64.append(image_to_base64(page_image))
                 page_durations.append(clip_duration)
@@ -140,7 +147,6 @@ if uploaded_file:
             progress_bar.empty()
 
             if page_images_b64:
-                # Build cumulative timestamps marking when each page's narration ends
                 cumulative = [0]
                 for d in page_durations:
                     cumulative.append(cumulative[-1] + d)
@@ -159,7 +165,7 @@ if uploaded_file:
                 <div style="max-width:600px;margin:auto;text-align:center;font-family:sans-serif;">
                     {images_html}
                     <audio id="narrationAudio" controls style="width:100%;margin-top:10px;">
-                        <source src="data:audio/mp3;base64,{audio_b64}" type="audio/mp3">
+                        <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
                     </audio>
                 </div>
                 <script>
@@ -208,7 +214,7 @@ if uploaded_file:
             show_explanation(explanation, final_mood)
 
             st.markdown('### Narration')
-            st.audio(audio_bytes, format='audio/mp3')
+            st.audio(audio_bytes, format='audio/wav')
 
         st.markdown('---')
         st.markdown('### Extracted Story Text')
