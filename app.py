@@ -9,7 +9,7 @@ from tts import generate_audio
 import fitz
 import base64
 import io
-from bark import SAMPLE_RATE
+from mutagen.mp3 import MP3
 
 st.set_page_config(page_title='Storybook Narrator', layout='centered')
 st.title('📖 Storybook Narrator')
@@ -24,15 +24,7 @@ uploaded_file = st.file_uploader(
 )
 
 
-def get_wav_duration(wav_bytes):
-    """Get duration of WAV audio in seconds."""
-    # WAV header is 44 bytes, then 2 bytes per sample (16-bit), mono
-    num_samples = (len(wav_bytes) - 44) / 2
-    return num_samples / SAMPLE_RATE
-
-
 def show_explanation(explanation, final_mood):
-    """Displays a transparent breakdown of why a mood was chosen."""
     with st.expander("ℹ️ Why was this mood chosen?"):
         st.write(
             f"**Image** contributed **{explanation['img_contribution_pct']}%** "
@@ -131,8 +123,8 @@ if uploaded_file:
                 text_mood, text_score, sentence_emotions = get_text_mood(text)
                 final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
 
-                audio_bytes = generate_audio(text, final_mood)
-                clip_duration = get_wav_duration(audio_bytes)
+                audio_bytes = generate_audio(text, final_mood, sentence_emotions)
+                clip_duration = MP3(io.BytesIO(audio_bytes)).info.length
 
                 page_images_b64.append(image_to_base64(page_image))
                 page_durations.append(clip_duration)
@@ -165,7 +157,7 @@ if uploaded_file:
                 <div style="max-width:600px;margin:auto;text-align:center;font-family:sans-serif;">
                     {images_html}
                     <audio id="narrationAudio" controls style="width:100%;margin-top:10px;">
-                        <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
+                        <source src="data:audio/mp3;base64,{audio_b64}" type="audio/mp3">
                     </audio>
                 </div>
                 <script>
@@ -196,7 +188,7 @@ if uploaded_file:
             text_mood, text_score, sentence_emotions = get_text_mood(text)
             final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
 
-            audio_bytes = generate_audio(text, final_mood)
+            audio_bytes = generate_audio(text, final_mood, sentence_emotions)
             full_text_display.append(f"**Mood: {final_mood}**: {text}")
 
             st.markdown('---')
@@ -214,7 +206,7 @@ if uploaded_file:
             show_explanation(explanation, final_mood)
 
             st.markdown('### Narration')
-            st.audio(audio_bytes, format='audio/wav')
+            st.audio(audio_bytes, format='audio/mp3')
 
         st.markdown('---')
         st.markdown('### Extracted Story Text')
