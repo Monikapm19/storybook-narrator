@@ -4,12 +4,12 @@ from input_handler import load_as_image
 from ocr import extract_text
 from clip_mood import get_image_mood
 from text_emotion import get_text_mood
-from fusion import fuse_moods
+from fusion import fuse_moods, fuse_sentence_level
 from tts import generate_audio
 import fitz
 import base64
 import io
-from bark import SAMPLE_RATE
+from mutagen.mp3 import MP3
 
 st.set_page_config(page_title='Storybook Narrator', layout='centered')
 st.title('📖 Storybook Narrator')
@@ -24,15 +24,7 @@ uploaded_file = st.file_uploader(
 )
 
 
-def get_wav_duration(wav_bytes):
-    """Get duration of WAV audio in seconds."""
-    # WAV header is 44 bytes, then 2 bytes per sample (16-bit), mono
-    num_samples = (len(wav_bytes) - 44) / 2
-    return num_samples / SAMPLE_RATE
-
-
 def show_explanation(explanation, final_mood):
-    """Displays a transparent breakdown of why a mood was chosen."""
     with st.expander("ℹ️ Why was this mood chosen?"):
         st.write(
             f"**Image** contributed **{explanation['img_contribution_pct']}%** "
@@ -61,6 +53,71 @@ def show_explanation(explanation, final_mood):
             )
         else:
             st.info("✅ Image and text agreed on the mood.")
+
+
+def fuse_page(img_mood, img_score, text_mood, text_score, text, sentence_emotions):
+    """
+    Runs sentence-level fusion (Novelty 1+2+3) when sentences are available:
+    each sentence's own text emotion is fused with the (constant) page
+    illustration mood individually, confidence-aware, with per-sentence
+    conflict/suspense/irony detection. Also derives one page-level summary
+    (final_mood, explanation) from that list, for the existing page badge
+    and PDF page-sync logic, which only need one mood per page.
+
+    Returns: (final_mood, explanation, sentence_fusions_or_None)
+    """
+    if not sentence_emotions:
+        final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
+        return final_mood, explanation, None
+
+    sentence_fusions = fuse_sentence_level(img_mood, img_score, sentence_emotions)
+
+    # Page-level summary mood = most common fused mood across sentences,
+    # ties broken by total confidence
+    mood_conf = {}
+    for sf in sentence_fusions:
+        mood_conf.setdefault(sf['mood'], []).append(sf['confidence'])
+    final_mood = max(mood_conf, key=lambda m: (len(mood_conf[m]), sum(mood_conf[m])))
+
+    any_conflict = any(sf['explanation']['conflict'] for sf in sentence_fusions)
+    special_labels = sorted({
+        sf['explanation']['special_label'] for sf in sentence_fusions
+        if sf['explanation']['special_label']
+    })
+    avg_img_pct = round(sum(sf['explanation']['img_contribution_pct'] for sf in sentence_fusions) / len(sentence_fusions))
+    avg_text_pct = round(sum(sf['explanation']['text_contribution_pct'] for sf in sentence_fusions) / len(sentence_fusions))
+    all_keywords = []
+    for sf in sentence_fusions:
+        for kw in sf['explanation']['matched_keywords']:
+            if kw not in all_keywords:
+                all_keywords.append(kw)
+
+    explanation = {
+        'img_mood': img_mood,
+        'text_mood': text_mood,
+        'img_contribution_pct': avg_img_pct,
+        'text_contribution_pct': avg_text_pct,
+        'matched_keywords': all_keywords[:3],
+        'conflict': any_conflict,
+        'special_label': special_labels[0] if special_labels else None,
+    }
+
+    return final_mood, explanation, sentence_fusions
+
+
+def show_sentence_breakdown(sentence_fusions):
+    """Per-sentence dynamic mood timeline (Novelty 1 + 3)."""
+    if not sentence_fusions or len(sentence_fusions) < 2:
+        return
+    with st.expander("🎬 Sentence-by-sentence mood timeline"):
+        for i, sf in enumerate(sentence_fusions, 1):
+            label = sf['explanation'].get('special_label')
+            tag = f" · 🎭 {label}" if label else (" · ⚠️ conflict" if sf['explanation']['conflict'] else "")
+            st.markdown(
+                f"**{i}.** {sf['sentence']}  \n"
+                f"→ **{sf['mood'].upper()}**{tag} "
+                f"(text said *{sf['text_mood']}*, confidence {sf['confidence']:.2f})"
+            )
 
 
 def image_to_base64(pil_image):
@@ -129,10 +186,16 @@ if uploaded_file:
 
                 img_mood, img_score = get_image_mood(page_image)
                 text_mood, text_score, sentence_emotions = get_text_mood(text)
-                final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
+                final_mood, explanation, sentence_fusions = fuse_page(
+                    img_mood, img_score, text_mood, text_score, text, sentence_emotions
+                )
 
-                audio_bytes = generate_audio(text, final_mood)
-                clip_duration = get_wav_duration(audio_bytes)
+                tts_sentences = (
+                    [(sf['sentence'], sf['mood'], sf['confidence']) for sf in sentence_fusions]
+                    if sentence_fusions else None
+                )
+                audio_bytes = generate_audio(text, final_mood, tts_sentences)
+                clip_duration = MP3(io.BytesIO(audio_bytes)).info.length
 
                 page_images_b64.append(image_to_base64(page_image))
                 page_durations.append(clip_duration)
@@ -143,6 +206,7 @@ if uploaded_file:
                 with results_area:
                     st.markdown(f"**Page {page_idx + 1} — Mood: {final_mood.upper()}**")
                     show_explanation(explanation, final_mood)
+                    show_sentence_breakdown(sentence_fusions)
 
             progress_bar.empty()
 
@@ -165,7 +229,7 @@ if uploaded_file:
                 <div style="max-width:600px;margin:auto;text-align:center;font-family:sans-serif;">
                     {images_html}
                     <audio id="narrationAudio" controls style="width:100%;margin-top:10px;">
-                        <source src="data:audio/wav;base64,{audio_b64}" type="audio/wav">
+                        <source src="data:audio/mp3;base64,{audio_b64}" type="audio/mp3">
                     </audio>
                 </div>
                 <script>
@@ -194,9 +258,15 @@ if uploaded_file:
 
             img_mood, img_score = get_image_mood(image)
             text_mood, text_score, sentence_emotions = get_text_mood(text)
-            final_mood, explanation = fuse_moods(img_mood, img_score, text_mood, text_score, text)
+            final_mood, explanation, sentence_fusions = fuse_page(
+                img_mood, img_score, text_mood, text_score, text, sentence_emotions
+            )
 
-            audio_bytes = generate_audio(text, final_mood)
+            tts_sentences = (
+                [(sf['sentence'], sf['mood'], sf['confidence']) for sf in sentence_fusions]
+                if sentence_fusions else None
+            )
+            audio_bytes = generate_audio(text, final_mood, tts_sentences)
             full_text_display.append(f"**Mood: {final_mood}**: {text}")
 
             st.markdown('---')
@@ -212,9 +282,10 @@ if uploaded_file:
 
             st.success(f"🎭 Final Mood: **{final_mood.upper()}**")
             show_explanation(explanation, final_mood)
+            show_sentence_breakdown(sentence_fusions)
 
             st.markdown('### Narration')
-            st.audio(audio_bytes, format='audio/wav')
+            st.audio(audio_bytes, format='audio/mp3')
 
         st.markdown('---')
         st.markdown('### Extracted Story Text')
