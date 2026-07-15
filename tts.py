@@ -2,15 +2,26 @@ import edge_tts
 import asyncio
 import io
 
+# edge-tts strips custom SSML (no <mstts:express-as> styles, no true emotion) —
+# only rate/volume/pitch on a single <prosody> tag are honored, and pitch has
+# been reported to have no audible effect on recent backend versions. So the
+# only two levers we can actually rely on are rate and volume, pushed to
+# deltas large enough to be clearly audible rather than a subtle nudge.
+# One narrator voice is kept constant across all moods so the story doesn't
+# sound like it's being read by a different person sentence to sentence —
+# only the delivery (speed/loudness) shifts with mood, the way a human
+# narrator would perform it.
+NARRATOR_VOICE = 'en-US-JennyNeural'
+
 MOOD_SETTINGS = {
-    'happy':    {'voice': 'en-US-JennyNeural', 'rate': '-5%',  'pitch': '+5Hz'},
-    'sad':      {'voice': 'en-US-JennyNeural', 'rate': '-20%', 'pitch': '-10Hz'},
-    'scary':    {'voice': 'en-US-JennyNeural', 'rate': '-15%', 'pitch': '-15Hz'},
-    'calm':     {'voice': 'en-US-JennyNeural', 'rate': '-10%', 'pitch': '+0Hz'},
-    'exciting': {'voice': 'en-US-JennyNeural', 'rate': '+5%',  'pitch': '+5Hz'},
-    'neutral':  {'voice': 'en-US-JennyNeural', 'rate': '+0%',  'pitch': '+0Hz'},
-    'suspense': {'voice': 'en-US-JennyNeural', 'rate': '-25%', 'pitch': '-20Hz'},
-    'irony':    {'voice': 'en-US-JennyNeural', 'rate': '+0%',  'pitch': '+0Hz'},
+    'happy':    {'voice': NARRATOR_VOICE, 'rate': '+3%',  'pitch': '+10Hz', 'volume': '+15%'},
+    'sad':      {'voice': NARRATOR_VOICE, 'rate': '-20%', 'pitch': '-10Hz', 'volume': '-20%'},
+    'scary':    {'voice': NARRATOR_VOICE, 'rate': '-18%', 'pitch': '-15Hz', 'volume': '-20%'},
+    'calm':     {'voice': NARRATOR_VOICE, 'rate': '-12%', 'pitch': '+0Hz',  'volume': '-8%'},
+    'exciting': {'voice': NARRATOR_VOICE, 'rate': '+15%', 'pitch': '+10Hz', 'volume': '+18%'},
+    'neutral':  {'voice': NARRATOR_VOICE, 'rate': '+0%',  'pitch': '+0Hz',  'volume': '+0%'},
+    'suspense': {'voice': NARRATOR_VOICE, 'rate': '-8%',  'pitch': '-18Hz', 'volume': '-25%'},
+    'irony':    {'voice': NARRATOR_VOICE, 'rate': '+8%',  'pitch': '+5Hz',  'volume': '+5%'},
 }
 
 async def _generate_single(text, mood):
@@ -19,7 +30,8 @@ async def _generate_single(text, mood):
         text=text,
         voice=settings['voice'],
         rate=settings['rate'],
-        pitch=settings['pitch']
+        pitch=settings['pitch'],
+        volume=settings['volume']
     )
     audio_buffer = io.BytesIO()
     async for chunk in communicate.stream():

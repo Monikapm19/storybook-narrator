@@ -1,8 +1,5 @@
 MOOD_LABELS = ['happy', 'sad', 'scary', 'calm', 'exciting', 'neutral']
 
-IMAGE_WEIGHT = 0.65
-TEXT_WEIGHT = 0.35
-
 MOOD_VALENCE = {
     'happy': 'positive',
     'calm': 'positive',
@@ -40,7 +37,15 @@ def detect_conflict(image_mood, image_score, text_mood, text_score):
     return None
 
 
-def fuse_moods(image_mood, image_score, text_mood, text_score, text=""):
+def fuse_single(image_mood, image_score, text_mood, text_score, text=""):
+    """
+    Confidence-aware fusion for one (image_mood, text_mood) pair.
+    Weights are proportional to each modality's own confidence for this pair
+    (not a fixed split) — a low-confidence CLIP prediction contributes less
+    than a high-confidence one, and likewise for text.
+
+    Returns (final_mood, fused_confidence, explanation_dict).
+    """
     total = image_score + text_score
     if total == 0:
         img_weight, text_weight = 0.5, 0.5
@@ -57,6 +62,8 @@ def fuse_moods(image_mood, image_score, text_mood, text_score, text=""):
         final_mood = image_mood
     else:
         final_mood = image_mood if image_score >= text_score else text_mood
+
+    fused_confidence = img_weight * image_score + text_weight * text_score
 
     matched_keywords = []
     if text:
@@ -75,4 +82,44 @@ def fuse_moods(image_mood, image_score, text_mood, text_score, text=""):
         'special_label': special_label,
     }
 
+    return final_mood, fused_confidence, explanation
+
+
+def fuse_moods(image_mood, image_score, text_mood, text_score, text=""):
+    """Page-level fusion (kept for the page's overall mood badge / summary)."""
+    final_mood, _, explanation = fuse_single(image_mood, image_score, text_mood, text_score, text)
     return final_mood, explanation
+
+
+def fuse_sentence_level(image_mood, image_score, sentence_emotions):
+    """
+    Novelty 1 + 2 + 3:
+    Fuses the page illustration's mood with EACH sentence's own text emotion
+    individually (confidence-aware weighting = Novelty 2), flagging
+    visual-textual conflicts per sentence with narrative labels like
+    'suspense' / 'irony' where applicable (Novelty 3). Driving narration off
+    this list — instead of one mood for the whole page — is what makes the
+    narration dynamically shift mood sentence to sentence (Novelty 1).
+
+    image_mood/image_score: from the page illustration (CLIP), constant
+        across every sentence on that page.
+    sentence_emotions: list of (sentence, text_mood, text_score) from
+        text_emotion.get_text_mood().
+
+    Returns: list of dicts, one per sentence:
+        {sentence, mood, confidence, text_mood, text_score, explanation}
+    """
+    results = []
+    for sentence, text_mood, text_score in sentence_emotions:
+        final_mood, fused_confidence, explanation = fuse_single(
+            image_mood, image_score, text_mood, text_score, sentence
+        )
+        results.append({
+            'sentence': sentence,
+            'mood': final_mood,
+            'confidence': fused_confidence,
+            'text_mood': text_mood,
+            'text_score': text_score,
+            'explanation': explanation,
+        })
+    return results
